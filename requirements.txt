@@ -1,0 +1,4 @@
+Flask
+google-auth-oauthlib
+google-api-python-client
+gunicorn  # Servidor web necesario para producción
