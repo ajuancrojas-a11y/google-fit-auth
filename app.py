@@ -6,21 +6,20 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 # --- CONFIGURACIÓN ---
-# El archivo client_secrets.json debe estar en el mismo directorio.
 CLIENT_SECRETS_FILE = "client_secrets.json"
-
-# Scopes necesarios para acceder a los datos de pasos de Google Fit
 SCOPES = [
     'https://www.googleapis.com/auth/fitness.activity.read',
     'https://www.googleapis.com/auth/fitness.activity.write'
 ]
 
-# El nombre del archivo donde se guardarán los tokens del usuario.
-TOKEN_FILE = 'google_fit_token.json'
+# --------------------------------------------------------------------------------
+# ¡SOLUCIÓN! Cambiamos la ruta del token a /tmp
+# --------------------------------------------------------------------------------
+# Vercel y otros servicios en la nube solo permiten escribir en /tmp
+TOKEN_FILE = '/tmp/google_fit_token.json'
 
 app = Flask(__name__)
-# ¡IMPORTANTE! Reemplaza esto con una cadena larga y aleatoria en producciónn
-app.secret_key = 'clave_secreta_para_la_sesion_flask' 
+app.secret_key = 'clave_secreta_para_la_sesion_flask'  
 
 # --- FUNCIÓN DE INICIO DE SESIÓN ---
 
@@ -28,19 +27,23 @@ app.secret_key = 'clave_secreta_para_la_sesion_flask'
 def index():
     """Página de inicio con el botón para iniciar la autenticación."""
     
-    # Comprobar si ya existe un token guardado.
-    if os.path.exists(TOKEN_FILE):
+    # Comprobar si ya existe un token guardado en el directorio temporal
+    # La existencia de este archivo es solo para fines de visualización en el servidor
+    token_exists = os.path.exists(TOKEN_FILE)
+
+    if token_exists:
         message = (
-            "✅ ¡Token de usuario guardado! Ya puedes usar 'google_fit_token.json' "
-            "con tu script de Python para insertar pasos. "
-            "Para un nuevo usuario, borra este archivo y recarga la página."
+            "✅ ¡Token de usuario guardado! El Refresh Token ha sido almacenado "
+            "temporalmente en el servidor. Para usarlo con tu script local, "
+            "necesitas acceder a los logs de Vercel/Render, copiar el JSON "
+            "y guardarlo localmente. Para un nuevo usuario, recarga la página."
         )
         button_html = "" # Ocultar el botón si ya está autenticado.
     else:
         message = "¡Bienvenido! Haz clic en el botón para iniciar sesión con Google y dar permisos a Google Fit."
         button_html = f"""
             <a href="{url_for('authorize')}" 
-               class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 transform hover:scale-105 block w-full text-center">
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 transform hover:scale-105 block w-full text-center">
                 Iniciar Sesión con Google Fit
             </a>
         """
@@ -67,11 +70,8 @@ def index():
             {button_html}
             
             <div class="mt-8 p-4 bg-gray-50 rounded-lg text-sm text-gray-500 border border-gray-200">
-                <p class="font-semibold mb-2 text-gray-700">Instrucciones para Memu Play:</p>
-                <p>1. Ejecuta este script de Python en tu PC.</p>
-                <p>2. Abre el navegador dentro de Memu Play.</p>
-                <p>3. Ingresa la dirección IP de tu PC seguido de :5000 (Ej: http://192.168.1.5:5000).</p>
-                <p>4. Haz clic en el botón de Iniciar Sesión.</p>
+                <p class="font-semibold mb-2 text-gray-700">Nota Importante:</p>
+                <p>El token se guarda en el directorio temporal (`/tmp`). Para usarlo localmente, necesitarás implementar una forma de copiar o mostrar el token en la consola (Logs de Vercel) y pegarlo en tu archivo local.</p>
             </div>
         </div>
     </body>
@@ -88,12 +88,12 @@ def authorize():
         flow = Flow.from_client_secrets_file(
             CLIENT_SECRETS_FILE, 
             scopes=SCOPES, 
-            redirect_uri=url_for('oauth2callback', _external=True)
+            redirect_uri=url_for('oauth2callback', _external=True, _scheme='https')
         )
 
         # Genera la URL de autenticación y el estado (state) para seguridad
         authorization_url, state = flow.authorization_url(
-            access_type='offline',  # ¡IMPORTANTE! Esto asegura que obtengamos un Refresh Token.
+            access_type='offline',  # Esto asegura que obtengamos un Refresh Token.
             include_granted_scopes='true'
         )
 
@@ -119,7 +119,7 @@ def oauth2callback():
             CLIENT_SECRETS_FILE,
             scopes=SCOPES,
             state=session['oauth_state'],
-            redirect_uri=url_for('oauth2callback', _external=True)
+            redirect_uri=url_for('oauth2callback', _external=True, _scheme='https')
         )
         
         # Intercambia el código de autorización por el Access Token y el Refresh Token
@@ -128,14 +128,29 @@ def oauth2callback():
         # Guarda las credenciales completas, incluyendo el Refresh Token
         credentials = flow.credentials
         
+        # --------------------------------------------------------------------------------
+        # ¡SOLUCIÓN IMPLEMENTADA! Escribir en /tmp
+        # --------------------------------------------------------------------------------
         with open(TOKEN_FILE, 'w') as token:
             token.write(credentials.to_json())
+
+        # IMPRIME EL TOKEN EN LA CONSOLA (¡CRUCIAL PARA USO LOCAL!)
+        # Este log aparecerá en la sección 'Logs' de Vercel/Render.
+        print("----------------------------------------------------------------")
+        print("✅ TOKEN DE GOOGLE FIT GENERADO. COPIA EL TEXTO JSON COMPLETO ABAJO:")
+        print(credentials.to_json())
+        print("----------------------------------------------------------------")
 
         # Mensaje de éxito para el usuario
         success_html = """
         <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative shadow-md" role="alert">
             <strong class="font-bold">¡Autenticación Exitosa!</strong>
-            <span class="block sm:inline">El Refresh Token de Google Fit se ha guardado en 'google_fit_token.json'.</span>
+            <span class="block sm:inline">El Refresh Token ha sido procesado. Ahora:</span>
+            <ul class="list-disc ml-5 mt-2 text-sm">
+                <li>Ve a la sección **Logs** de tu proyecto en Vercel.</li>
+                <li>Copia el texto JSON completo del token que se imprimió.</li>
+                <li>Pégalo en un archivo local llamado **google_fit_token.json** para tu script.</li>
+            </ul>
         </div>
         <p class="mt-4 text-center text-gray-600">Puedes cerrar esta ventana en Memu Play.</p>
         """
@@ -160,5 +175,5 @@ def oauth2callback():
 
 
 if __name__ == '__main__':
-    # Ejecuta en 127.0.0.1:5000. Usa host='0.0.0.0' si tienes problemas para acceder con la IP local.
+    # Esta parte se ignora en Vercel, pero es necesaria para pruebas locales
     app.run(debug=True, host='0.0.0.0')
