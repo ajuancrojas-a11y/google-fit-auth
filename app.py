@@ -8,13 +8,14 @@ from flask import Flask, redirect, url_for, session, request, Response
 
 app = Flask(__name__)
 # La clave secreta de Flask se usa para cifrar las sesiones
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secreto_y_temporal")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_key_for_flask")
 
 # --- CONFIGURACIÓN DE GOOGLE FIT ---
 CLIENT_ID = os.environ.get("CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
+
 # URL Base de Vercel/tu app (ej: google-fit-auth.vercel.app)
-# IMPORTANTE: Asegúrate de que esta URL base sea correcta.
+# IMPORTANTE: Confirma que la URL de tu proyecto sea correcta.
 VERCEL_URL = "google-fit-auth.vercel.app" 
 AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -27,22 +28,8 @@ SCOPE = [
 
 @app.route("/")
 def index():
-    """Página de inicio con el botón de conexión, mostrando claves para depuración."""
+    """Página de inicio con el botón de conexión."""
     
-    # ----------------------------------------------------
-    # ATENCIÓN: ESTA SECCIÓN ES SOLO PARA DEPURACIÓN
-    # ----------------------------------------------------
-    debug_info = f"""
-    <div style="border: 2px solid #dc3545; padding: 15px; margin-bottom: 20px; background-color: #f8d7da; color: #721c24; text-align: left;">
-        <h2>🚨 Información de Depuración (Eliminar después de verificar)</h2>
-        <p><strong>CLIENT_ID (Vercel):</strong> {CLIENT_ID}</p>
-        <p><strong>CLIENT_SECRET (Vercel):</strong> {CLIENT_SECRET}</p>
-        <p><strong>URL de Redirección Esperada:</strong> {REDIRECT_URI}</p>
-        <p>Compara estos valores con tu archivo JSON de credenciales.</p>
-    </div>
-    """
-    # ----------------------------------------------------
-
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -77,7 +64,6 @@ def index():
     </head>
     <body>
         <div class="container">
-            {debug_info}
             <h1>Conexión a Google Fit</h1>
             <p>
                 Haz clic para autorizar la conexión. El token será guardado
@@ -110,6 +96,11 @@ def authorize():
         "prompt": "consent",       # Forzar el consentimiento para obtener siempre el refresh token
     }
     auth_url = f"{AUTH_URL}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+    
+    if not CLIENT_ID or not CLIENT_SECRET:
+         # Redirigir a una página de error si las claves no están configuradas
+         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel. Por favor, revísalas.")
+    
     return redirect(auth_url)
 
 @app.route("/oauth2callback")
@@ -117,12 +108,11 @@ def oauth2callback():
     """Maneja la respuesta del servidor de Google y fuerza la descarga del token."""
     code = request.args.get("code")
     error_detail = None
-
-    # Verifica que las claves no sean nulas antes de usarlas
-    if not CLIENT_ID or not CLIENT_SECRET:
-        error_detail = "Error de configuración: CLIENT_ID o CLIENT_SECRET están vacíos en Vercel."
     
-    elif code:
+    if not CLIENT_ID or not CLIENT_SECRET:
+         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel.")
+
+    if code:
         # 1. Intercambio de código por tokens
         try:
             token_response = requests.post(
@@ -168,33 +158,40 @@ def oauth2callback():
                 return response 
                 
             else:
-                error_detail = token_data.get("error_description", "No se recibió refresh_token. Revisa si el usuario revocó el permiso anteriormente.")
+                # Error en el intercambio de token, puede ser invalid_client (si las claves son incorrectas)
+                # o user_denied (si el usuario revocó o denegó el permiso)
+                error_desc = token_data.get("error_description", "Error desconocido al obtener el token.")
+                error_detail = f"Fallo al obtener refresh_token. Mensaje de Google: {error_desc}. Asegúrate de que CLIENT_ID y CLIENT_SECRET sean correctos."
 
         except Exception as e:
             error_detail = f"Fallo al intercambiar el código por tokens: {str(e)}"
     
     else:
         # Esto ocurre si el usuario deniega los permisos
-        error_detail = "El usuario denegó la autorización o el código no fue proporcionado."
+        error_detail = "El usuario denegó la autorización o el código no fue proporcionado. Revoca el permiso en Google si necesitas intentar de nuevo."
 
     # Si hay un error, lo mostramos en una página de error simple
+    return error_page("Error de Conexión", error_detail)
+
+def error_page(title, detail):
+    """Genera una página HTML simple para mostrar errores."""
     return f"""
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Error</title>
+        <title>{title}</title>
         <style>
             body {{ font-family: sans-serif; text-align: center; padding: 50px; background-color: #f8d7da; color: #721c24; }}
             h1 {{ color: #dc3545; }}
-            .detail {{ margin-top: 20px; padding: 15px; background-color: #f5c6cb; border: 1px solid #f5c6cb; border-radius: 5px; text-align: left; }}
+            .detail {{ margin-top: 20px; padding: 15px; background-color: #f5c6cb; border: 1px solid #f5c6cb; border-radius: 5px; text-align: left; white-space: pre-wrap; }}
         </style>
     </head>
     <body>
-        <h1>❌ ¡Error de Conexión!</h1>
-        <p>No se pudo generar o descargar el token.</p>
-        <div class="detail">Detalles: {error_detail}</div>
+        <h1>❌ ¡{title}!</h1>
+        <p>No se pudo completar el proceso.</p>
+        <div class="detail">{detail}</div>
     </body>
     </html>
     """
