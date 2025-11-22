@@ -1,250 +1,191 @@
-import os
 import json
-from flask import Flask, redirect, url_for, request, session, render_template_string
-from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
+import os
+import requests
+import time
+
+# Flask
+from flask import Flask, redirect, url_for, session, request, Response
+
+app = Flask(__name__)
+# La clave secreta de Flask se usa para cifrar las sesiones
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secreto_y_temporal")
 
 # --- CONFIGURACIÓN DE GOOGLE FIT ---
-CLIENT_SECRETS_FILE = "client_secrets.json"
-SCOPES = [
-    'https://www.googleapis.com/auth/fitness.activity.read',
-    'https://www.googleapis.com/auth/fitness.activity.write'
+CLIENT_ID = os.environ.get("CLIENT_ID")
+CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
+# URL Base de Vercel/tu app (ej: google-fit-auth.vercel.app)
+# IMPORTANTE: Asegúrate de que esta URL base sea correcta.
+VERCEL_URL = "google-fit-auth.vercel.app" 
+AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+REDIRECT_URI = f"https://{VERCEL_URL}/oauth2callback"
+SCOPE = [
+    "https://www.googleapis.com/auth/fitness.activity.read",
+    "https://www.googleapis.com/auth/fitness.location.read",
+    "https://www.googleapis.com/auth/userinfo.email"
 ]
-
-# --- CONFIGURACIÓN DE GOOGLE DRIVE (DESDE VERCEL SECRETS.) ---
-GDRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file']
-GDRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID') # La ID del folder de Drive
-SERVICE_ACCOUNT_KEY = os.getenv('GDRIVE_SERVICE_ACCOUNT_KEY') # JSON de la cuenta de servicio
-
-# --- CONFIGURACIÓN DE FLASK ---
-app = Flask(__name__)
-app.secret_key = 'clave_secreta_para_la_sesion_flask'  
-
-# --------------------------------------------------------------------------------
-# FUNCIÓN PARA CREAR CREDENCIALES DE DRIVE USANDO LA CUENTA DE SERVICIO
-# --------------------------------------------------------------------------------
-def get_drive_service():
-    """Crea una instancia de la API de Google Drive autenticada con la clave de servicio."""
-    if not SERVICE_ACCOUNT_KEY or not GDRIVE_FOLDER_ID:
-        print("ERROR: Falta GOOGLE_DRIVE_FOLDER_ID o GDRIVE_SERVICE_ACCOUNT_KEY en Vercel Secrets.")
-        return None
-        
-    try:
-        # Convertir el JSON de la clave secreta de string a objeto
-        info = json.loads(SERVICE_ACCOUNT_KEY)
-        
-        # Crear las credenciales de Service Account
-        credentials = service_account.Credentials.from_service_account_info(
-            info, scopes=GDRIVE_SCOPES
-        )
-        
-        # Construir y devolver el servicio de Drive
-        return build('drive', 'v3', credentials=credentials)
-    except Exception as e:
-        print(f"ERROR: No se pudo crear el servicio de Drive: {e}")
-        return None
-
-# --- RUTAS DE LA APLICACIÓN ---
 
 @app.route("/")
 def index():
-    """Página de inicio con el botón para iniciar la autenticación."""
-    
-    # Comprobar si las variables de entorno están listas
-    if not GDRIVE_FOLDER_ID or not SERVICE_ACCOUNT_KEY:
-        error_message = "ERROR: La configuración de Google Drive no está completa. Revisa las variables de entorno en Vercel."
-        
-        # HTML para mostrar el error de configuración
-        html_content = f"""
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Google Fit Auth (Drive Error)</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="p-8 flex items-center justify-center min-h-screen">
-            <div class="max-w-md w-full bg-white p-6 rounded-xl shadow-lg border border-red-500">
-                <h1 class="text-3xl font-extrabold text-red-600 mb-4 text-center">¡Error de Configuración!</h1>
-                <p class="text-red-700 mb-6 text-center">{error_message}</p>
-                <div class="mt-4 p-4 bg-red-50 rounded-lg text-sm text-red-500">
-                    <p>Asegúrate de haber configurado las variables <code>GOOGLE_DRIVE_FOLDER_ID</code> y <code>GDRIVE_SERVICE_ACCOUNT_KEY</code> en Vercel.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        return render_template_string(html_content), 500
-
-    # Si todo está listo, mostrar el botón de inicio
-    message = "¡Bienvenido! El token se guardará automáticamente en Google Drive."
-    button_html = f"""
-        <a href="{url_for('authorize')}" 
-            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 transform hover:scale-105 block w-full text-center">
-            Iniciar Sesión con Google Fit
-        </a>
-    """
-    
-    # HTML simple con Tailwind CSS
+    """Página de inicio con el botón de conexión."""
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Google Fit Auth (Google Drive)</title>
-        <script src="https://cdn.tailwindcss.com"></script>
+        <title>Conexión a Google Fit</title>
         <style>
-            body {{ font-family: 'Inter', sans-serif; background-color: #f4f7f9; }}
+            body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }}
+            .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }}
+            h1 {{ color: #202124; font-size: 24px; margin-bottom: 20px; }}
+            p {{ color: #5f6368; margin-bottom: 30px; line-height: 1.5; }}
+            .google-btn {{
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background-color: #4285f4;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-weight: 500;
+                font-size: 16px;
+                transition: background-color 0.3s;
+                border: none;
+                cursor: pointer;
+            }}
+            .google-btn:hover {{ background-color: #357ae8; }}
+            .google-icon {{ width: 24px; height: 24px; margin-right: 12px; }}
+            .note {{ margin-top: 30px; font-size: 14px; color: #70757a; text-align: left; border-top: 1px solid #eee; padding-top: 20px; }}
         </style>
     </head>
-    <body class="p-4 sm:p-8 flex items-center justify-center min-h-screen">
-        <div class="max-w-md w-full bg-white p-6 sm:p-8 rounded-xl shadow-2xl border border-gray-100">
-            <h1 class="text-3xl font-extrabold text-gray-900 mb-6 text-center">
-                Conexión a Google Fit
-            </h1>
-            <p class="text-gray-600 mb-8 text-center">{message}</p>
-            {button_html}
-            
-            <div class="mt-8 p-4 bg-gray-50 rounded-lg text-sm text-gray-500 border border-gray-200">
-                <p class="font-semibold mb-2 text-gray-700">Flujo Automático:</p>
-                <p>Usa esta aplicación en cada una de tus 50 instancias. Cada token se subirá a la carpeta de Google Drive que configuraste.</p>
+    <body>
+        <div class="container">
+            <h1>Conexión a Google Fit</h1>
+            <p>
+                Haz clic para autorizar la conexión. El token será guardado
+                automáticamente como un archivo JSON en la carpeta de <strong>Descargas</strong> de este dispositivo (Memu Play).
+            </p>
+            <a href="{url_for('authorize')}" class="google-btn">
+                <svg class="google-icon" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zM12.7 7.7L11 9.4 13.9 12.3 15.6 10.6 12.7 7.7zM15.4 13.1c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9-.4.9-.9.9zM12.7 13.1c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9-.4.9-.9.9zM15.4 15.8c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9-.4.9-.9.9zM12.7 15.8c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9-.4.9-.9.9zM10 10.4c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9-.4.9-.9.9z"/>
+                </svg>
+                Conectar con Google Fit
+            </a>
+            <div class="note">
+                <strong>Nota:</strong> Después de la conexión, busca el archivo JSON en la carpeta de Descargas de Memu Play.
             </div>
         </div>
     </body>
     </html>
     """
-    return render_template_string(html_content)
+    return html_content
 
-
-@app.route('/authorize')
+@app.route("/authorize")
 def authorize():
-    """Redirige al usuario al flujo de consentimiento de Google."""
-    
-    try:
-        # Crea el objeto Flow que manejará el proceso OAuth
-        flow = Flow.from_client_secrets_file(
-            CLIENT_SECRETS_FILE, 
-            scopes=SCOPES, 
-            redirect_uri=url_for('oauth2callback', _external=True, _scheme='https')
-        )
+    """Redirige al usuario a la URL de autenticación de Google."""
+    params = {
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(SCOPE),
+        "access_type": "offline",  # Importante para obtener el refresh token
+        "prompt": "consent",       # Forzar el consentimiento para obtener siempre el refresh token
+    }
+    auth_url = f"{AUTH_URL}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+    return redirect(auth_url)
 
-        # Genera la URL de autenticación y el estado (state) para seguridad
-        authorization_url, state = flow.authorization_url(
-            access_type='offline',  # Esto asegura que obtengamos un Refresh Token.
-            include_granted_scopes='true'
-        )
-
-        # Guarda el estado en la sesión para validarlo en el callback
-        session['oauth_state'] = state
-        return redirect(authorization_url)
-    except FileNotFoundError:
-        return "Error: El archivo 'client_secrets.json' no se encontró. Asegúrate de que esté en el mismo directorio.", 500
-    except Exception as e:
-        return f"Error al iniciar el flujo de autorización: {str(e)}", 500
-
-@app.route('/oauth2callback')
+@app.route("/oauth2callback")
 def oauth2callback():
-    """Ruta a la que Google redirige después de que el usuario da su consentimiento."""
+    """Maneja la respuesta del servidor de Google y fuerza la descarga del token."""
+    code = request.args.get("code")
+    error_detail = None
+
+    if code:
+        # 1. Intercambio de código por tokens
+        try:
+            token_response = requests.post(
+                TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                    "redirect_uri": REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_data = token_response.json()
+
+            if "refresh_token" in token_data:
+                
+                # Extraer email para usar como referencia en el nombre del archivo
+                user_info_response = requests.get(
+                    "https://www.googleapis.com/oauth2/v1/userinfo",
+                    headers={"Authorization": f"Bearer {token_data['access_token']}"}
+                )
+                user_info = user_info_response.json()
+                user_email = user_info.get('email', 'unknown-user')
+                
+                # Token a guardar (solo necesitamos el refresh_token y el client info)
+                token_to_save = {
+                    "refresh_token": token_data["refresh_token"],
+                    "client_id": CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                }
+                
+                # Nombre del archivo basado en el email
+                # Reemplazamos el '@' con '_at_' para asegurar que sea un nombre de archivo válido
+                filename = f"google_fit_token_{user_email.replace('@', '_at_')}.json"
+                
+                # --- PASO CRÍTICO: FUERZA LA DESCARGA ---
+                # Crea la respuesta con el contenido JSON formateado
+                response = Response(
+                    json.dumps(token_to_save, indent=4),
+                    mimetype='application/json'
+                )
+                # Configura las cabeceras para forzar la descarga del archivo
+                response.headers['Content-Disposition'] = f'attachment; filename={filename}'
+                
+                # Imprime en logs solo como confirmación de que la descarga fue enviada
+                print(f"✅ Token generado y enviado para descarga: {filename}")
+                
+                # Devuelve el archivo para descargar. Esto es lo que verá el usuario final.
+                return response 
+                
+            else:
+                error_detail = token_data.get("error_description", "No se recibió refresh_token. Revisa si el usuario revocó el permiso anteriormente.")
+
+        except Exception as e:
+            error_detail = f"Fallo al intercambiar el código por tokens: {str(e)}"
     
-    if request.args.get('state') != session.get('oauth_state'):
-        return "Error de estado de OAuth. Posible ataque CSRF.", 400
-        
-    try:
-        # 1. Obtener Credenciales
-        flow = Flow.from_client_secrets_file(
-            CLIENT_SECRETS_FILE,
-            scopes=SCOPES,
-            state=session['oauth_state'],
-            redirect_uri=url_for('oauth2callback', _external=True, _scheme='https')
-        )
-        flow.fetch_token(authorization_response=request.url)
-        credentials = flow.credentials
-        
-        # Obtener la ID de usuario de Google para nombrar el archivo
-        user_id = credentials.id_token.get('sub') if credentials.id_token else "unknown_user"
-        file_name = f"{user_id}.json"
-        token_json_str = credentials.to_json()
+    else:
+        # Esto ocurre si el usuario deniega los permisos
+        error_detail = "El usuario denegó la autorización o el código no fue proporcionado."
 
-        # 2. Subir a Google Drive
-        drive_service = get_drive_service()
-        if drive_service is None:
-            raise Exception("No se pudo obtener el servicio de Google Drive. Revisa los logs.")
+    # Si hay un error, lo mostramos en una página de error simple
+    return f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error</title>
+        <style>
+            body {{ font-family: sans-serif; text-align: center; padding: 50px; background-color: #f8d7da; color: #721c24; }}
+            h1 {{ color: #dc3545; }}
+            .detail {{ margin-top: 20px; padding: 15px; background-color: #f5c6cb; border: 1px solid #f5c6cb; border-radius: 5px; text-align: left; }}
+        </style>
+    </head>
+    <body>
+        <h1>❌ ¡Error de Conexión!</h1>
+        <p>No se pudo generar o descargar el token.</p>
+        <div class="detail">Detalles: {error_detail}</div>
+    </body>
+    </html>
+    """
 
-        # Metadata del archivo (nombre, tipo y dónde guardarlo)
-        file_metadata = {
-            'name': file_name,
-            'parents': [GDRIVE_FOLDER_ID], # La carpeta destino
-            'mimeType': 'application/json'
-        }
-        
-        # Crear un objeto media para el contenido (el token JSON)
-        from googleapiclient.http import MediaIoBaseUpload
-        import io
-        
-        # El token se sube como un archivo JSON
-        media = MediaIoBaseUpload(io.BytesIO(token_json_str.encode('utf-8')),
-                                 mimetype='application/json',
-                                 chunksize=1024*1024,
-                                 resumable=True)
-                                 
-        # Subir el archivo (o actualizarlo si ya existe)
-        # Búsqueda rápida para ver si el archivo ya existe
-        results = drive_service.files().list(
-            q=f"'{GDRIVE_FOLDER_ID}' in parents and name='{file_name}' and trashed=false",
-            fields="files(id, name)").execute()
-        
-        items = results.get('files', [])
-
-        if items:
-            # Si el archivo existe, lo actualiza
-            file_id = items[0]['id']
-            drive_service.files().update(fileId=file_id, media_body=media).execute()
-            print(f"✅ Token actualizado en Google Drive: {file_name}")
-            action = "actualizado"
-        else:
-            # Si el archivo NO existe, lo crea
-            drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            print(f"✅ Token creado en Google Drive: {file_name}")
-            action = "guardado"
-
-
-        # Mensaje de éxito para el usuario
-        success_html = f"""
-        <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative shadow-md" role="alert">
-            <strong class="font-bold">¡Autenticación Exitosa!</strong>
-            <span class="block sm:inline">El Refresh Token para el usuario **{user_id}** ha sido {action} automáticamente en tu carpeta de Google Drive.</span>
-            <ul class="list-disc ml-5 mt-2 text-sm">
-                <li>Ya puedes cerrar esta ventana en Memu Play.</li>
-                <li>Revisa tu carpeta de Drive para ver el archivo <strong>{file_name}</strong>.</li>
-            </ul>
-        </div>
-        <p class="mt-4 text-center text-gray-600">Procede con el siguiente usuario de Memu Play.</p>
-        """
-        return render_template_string(f"""
-            <!DOCTYPE html>
-            <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Éxito</title><script src="https://cdn.tailwindcss.com"></script></head>
-            <body class="p-8 flex items-center justify-center min-h-screen"><div class="max-w-md w-full bg-white p-6 rounded-xl shadow-lg">{success_html}</div></body></html>
-        """)
-        
-    except Exception as e:
-        error_html = f"""
-        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative shadow-md" role="alert">
-            <strong class="font-bold">¡Error de Autenticación o Drive!</strong>
-            <span class="block sm:inline">No se pudo guardar el token en Drive. Detalles: {str(e)}. Revisa los logs de Vercel y los permisos de Drive.</span>
-        </div>
-        """
-        return render_template_string(f"""
-            <!DOCTYPE html>
-            <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Error</title><script src="https://cdn.tailwindcss.com"></script></head>
-            <body class="p-8 flex items-center justify-center min-h-screen"><div class="max-w-md w-full bg-white p-6 rounded-xl shadow-lg">{error_html}</div></body></html>
-        """)
-
-
-if __name__ == '__main__':
-    # NOTA: Esto no funciona en Vercel, pero se mantiene para pruebas locales
-
-    app.run(debug=True, host='0.0.0.0')
+# Vercel necesita un punto de entrada para el servidor (gunicorn lo usa)
+if __name__ == "__main__":
+    # Esta línea se usa solo para pruebas locales; Vercel usa gunicorn
+    app.run(debug=True)
