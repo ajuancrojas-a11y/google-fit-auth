@@ -1,5 +1,6 @@
 Flask
 google-auth-oauthlib
 google-api-python-client
-google-oauth2
+google-auth
 gunicorn  # Servidor web necesario para producción
+
