@@ -27,7 +27,22 @@ SCOPE = [
 
 @app.route("/")
 def index():
-    """Página de inicio con el botón de conexión."""
+    """Página de inicio con el botón de conexión, mostrando claves para depuración."""
+    
+    # ----------------------------------------------------
+    # ATENCIÓN: ESTA SECCIÓN ES SOLO PARA DEPURACIÓN
+    # ----------------------------------------------------
+    debug_info = f"""
+    <div style="border: 2px solid #dc3545; padding: 15px; margin-bottom: 20px; background-color: #f8d7da; color: #721c24; text-align: left;">
+        <h2>🚨 Información de Depuración (Eliminar después de verificar)</h2>
+        <p><strong>CLIENT_ID (Vercel):</strong> {CLIENT_ID}</p>
+        <p><strong>CLIENT_SECRET (Vercel):</strong> {CLIENT_SECRET}</p>
+        <p><strong>URL de Redirección Esperada:</strong> {REDIRECT_URI}</p>
+        <p>Compara estos valores con tu archivo JSON de credenciales.</p>
+    </div>
+    """
+    # ----------------------------------------------------
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -37,7 +52,7 @@ def index():
         <title>Conexión a Google Fit</title>
         <style>
             body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }}
-            .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }}
+            .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 600px; width: 90%; }}
             h1 {{ color: #202124; font-size: 24px; margin-bottom: 20px; }}
             p {{ color: #5f6368; margin-bottom: 30px; line-height: 1.5; }}
             .google-btn {{
@@ -62,6 +77,7 @@ def index():
     </head>
     <body>
         <div class="container">
+            {debug_info}
             <h1>Conexión a Google Fit</h1>
             <p>
                 Haz clic para autorizar la conexión. El token será guardado
@@ -102,7 +118,11 @@ def oauth2callback():
     code = request.args.get("code")
     error_detail = None
 
-    if code:
+    # Verifica que las claves no sean nulas antes de usarlas
+    if not CLIENT_ID or not CLIENT_SECRET:
+        error_detail = "Error de configuración: CLIENT_ID o CLIENT_SECRET están vacíos en Vercel."
+    
+    elif code:
         # 1. Intercambio de código por tokens
         try:
             token_response = requests.post(
@@ -135,22 +155,16 @@ def oauth2callback():
                 }
                 
                 # Nombre del archivo basado en el email
-                # Reemplazamos el '@' con '_at_' para asegurar que sea un nombre de archivo válido
                 filename = f"google_fit_token_{user_email.replace('@', '_at_')}.json"
                 
                 # --- PASO CRÍTICO: FUERZA LA DESCARGA ---
-                # Crea la respuesta con el contenido JSON formateado
                 response = Response(
                     json.dumps(token_to_save, indent=4),
                     mimetype='application/json'
                 )
-                # Configura las cabeceras para forzar la descarga del archivo
                 response.headers['Content-Disposition'] = f'attachment; filename={filename}'
                 
-                # Imprime en logs solo como confirmación de que la descarga fue enviada
                 print(f"✅ Token generado y enviado para descarga: {filename}")
-                
-                # Devuelve el archivo para descargar. Esto es lo que verá el usuario final.
                 return response 
                 
             else:
@@ -185,7 +199,5 @@ def oauth2callback():
     </html>
     """
 
-# Vercel necesita un punto de entrada para el servidor (gunicorn lo usa)
 if __name__ == "__main__":
-    # Esta línea se usa solo para pruebas locales; Vercel usa gunicorn
     app.run(debug=True)
