@@ -10,10 +10,6 @@ app = Flask(__name__)
 # La clave secreta de Flask se usa para cifrar las sesiones
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_key_for_flask")
 
-# --- CONFIGURACIÓN DE GOOGLE FIT ---
-CLIENT_ID = os.environ.get("CLIENT_ID")
-CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
-
 # URL Base de Vercel/tu app (ej: google-fit-auth.vercel.app)
 # IMPORTANTE: Confirma que la URL de tu proyecto sea correcta.
 VERCEL_URL = "google-fit-auth.vercel.app" 
@@ -26,10 +22,29 @@ SCOPE = [
     "https://www.googleapis.com/auth/userinfo.email"
 ]
 
+def get_client_credentials():
+    """Lee las credenciales del entorno de Vercel en el momento de ejecución."""
+    client_id = os.environ.get("CLIENT_ID")
+    client_secret = os.environ.get("CLIENT_SECRET")
+    return client_id, client_secret
+
 @app.route("/")
 def index():
-    """Página de inicio con el botón de conexión."""
+    """Página de inicio con el botón de conexión y la información de depuración."""
     
+    CLIENT_ID, CLIENT_SECRET = get_client_credentials()
+
+    # Contenido de Depuración
+    debug_info = f"""
+    <div class="debug-box">
+        <h2>⚠️ Información de Depuración (Eliminar después de verificar)</h2>
+        <p><strong>CLIENT_ID (Vercel):</strong> {CLIENT_ID if CLIENT_ID else 'None'}</p>
+        <p><strong>CLIENT_SECRET (Vercel):</strong> {CLIENT_SECRET if CLIENT_SECRET else 'None'}</p>
+        <p><strong>URL de Redirección Esperada:</strong> {REDIRECT_URI}</p>
+        <p>Compara estos valores con tu archivo JSON de credenciales.</p>
+    </div>
+    """
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -60,10 +75,22 @@ def index():
             .google-btn:hover {{ background-color: #357ae8; }}
             .google-icon {{ width: 24px; height: 24px; margin-right: 12px; }}
             .note {{ margin-top: 30px; font-size: 14px; color: #70757a; text-align: left; border-top: 1px solid #eee; padding-top: 20px; }}
+            .debug-box {{ 
+                margin-bottom: 30px; 
+                padding: 20px; 
+                background-color: #ffebeb; 
+                border: 1px solid #ff0000; 
+                border-radius: 8px; 
+                text-align: left; 
+                color: #ff0000;
+            }}
+            .debug-box h2 {{ margin-top: 0; font-size: 18px; color: #cc0000; }}
+            .debug-box p {{ margin: 5px 0; color: #cc0000; }}
         </style>
     </head>
     <body>
         <div class="container">
+            {debug_info}
             <h1>Conexión a Google Fit</h1>
             <p>
                 Haz clic para autorizar la conexión. El token será guardado
@@ -87,6 +114,15 @@ def index():
 @app.route("/authorize")
 def authorize():
     """Redirige al usuario a la URL de autenticación de Google."""
+    
+    CLIENT_ID, CLIENT_SECRET = get_client_credentials()
+    
+    if not CLIENT_ID or not CLIENT_SECRET:
+         # Usamos la página de error para mostrar el fallo de configuración
+         return error_page("Error de Configuración", 
+                           "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel. Por favor, revísalas.",
+                           CLIENT_ID, CLIENT_SECRET)
+    
     params = {
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -97,10 +133,6 @@ def authorize():
     }
     auth_url = f"{AUTH_URL}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
     
-    if not CLIENT_ID or not CLIENT_SECRET:
-         # Redirigir a una página de error si las claves no están configuradas
-         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel. Por favor, revísalas.")
-    
     return redirect(auth_url)
 
 @app.route("/oauth2callback")
@@ -109,8 +141,10 @@ def oauth2callback():
     code = request.args.get("code")
     error_detail = None
     
+    CLIENT_ID, CLIENT_SECRET = get_client_credentials()
+
     if not CLIENT_ID or not CLIENT_SECRET:
-         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel.")
+         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel.", CLIENT_ID, CLIENT_SECRET)
 
     if code:
         # 1. Intercambio de código por tokens
@@ -138,6 +172,9 @@ def oauth2callback():
                 user_email = user_info.get('email', 'unknown-user')
                 
                 # Token a guardar (solo necesitamos el refresh_token y el client info)
+                # IMPORTANTE: Guardamos el CLIENT_ID y CLIENT_SECRET dentro del token JSON.
+                # Esto es necesario para que el script 'insertar_pasos.py' pueda refrescar 
+                # el token localmente usando google-auth.
                 token_to_save = {
                     "refresh_token": token_data["refresh_token"],
                     "client_id": CLIENT_ID,
@@ -158,10 +195,9 @@ def oauth2callback():
                 return response 
                 
             else:
-                # Error en el intercambio de token, puede ser invalid_client (si las claves son incorrectas)
-                # o user_denied (si el usuario revocó o denegó el permiso)
-                error_desc = token_data.get("error_description", "Error desconocido al obtener el token.")
-                error_detail = f"Fallo al obtener refresh_token. Mensaje de Google: {error_desc}. Asegúrate de que CLIENT_ID y CLIENT_SECRET sean correctos."
+                # Error en el intercambio de token, puede ser invalid_client, etc.
+                error_desc = token_data.get("error_description", token_data.get("error", "Error desconocido al obtener el token."))
+                error_detail = f"Fallo al obtener refresh_token.\n\nMensaje de Google: {error_desc}\n\nAsegúrate de que CLIENT_ID y CLIENT_SECRET sean correctos y que la URL de redirección en Google Cloud Console coincida exactamente con: {REDIRECT_URI}."
 
         except Exception as e:
             error_detail = f"Fallo al intercambiar el código por tokens: {str(e)}"
@@ -171,10 +207,23 @@ def oauth2callback():
         error_detail = "El usuario denegó la autorización o el código no fue proporcionado. Revoca el permiso en Google si necesitas intentar de nuevo."
 
     # Si hay un error, lo mostramos en una página de error simple
-    return error_page("Error de Conexión", error_detail)
+    return error_page("Error de Conexión", error_detail, CLIENT_ID, CLIENT_SECRET)
 
-def error_page(title, detail):
-    """Genera una página HTML simple para mostrar errores."""
+def error_page(title, detail, client_id_val=None, client_secret_val=None):
+    """Genera una página HTML simple para mostrar errores con info de debug."""
+    
+    # Prepara la información de debug para el error
+    debug_section = ""
+    if client_id_val is None or client_secret_val is None:
+        debug_section = f"""
+        <div class="debug-box">
+            <h2>🚨 Diagnóstico de Variables de Entorno</h2>
+            <p><strong>CLIENT_ID (Leído):</strong> {client_id_val if client_id_val else '❌ Falla la lectura (None)'}</p>
+            <p><strong>CLIENT_SECRET (Leído):</strong> {client_secret_val if client_secret_val else '❌ Falla la lectura (None)'}</p>
+            <p><strong>ACCIONES:</strong> Vuelve a desplegar la aplicación en Vercel y verifica que las variables CLIENT_ID y CLIENT_SECRET estén configuradas para **All Environments**.</p>
+        </div>
+        """
+        
     return f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -183,15 +232,39 @@ def error_page(title, detail):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>{title}</title>
         <style>
-            body {{ font-family: sans-serif; text-align: center; padding: 50px; background-color: #f8d7da; color: #721c24; }}
-            h1 {{ color: #dc3545; }}
-            .detail {{ margin-top: 20px; padding: 15px; background-color: #f5c6cb; border: 1px solid #f5c6cb; border-radius: 5px; text-align: left; white-space: pre-wrap; }}
+            body {{ font-family: sans-serif; text-align: center; padding: 50px; background-color: #f0f2f5; color: #495057; }}
+            .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 600px; width: 90%; margin: 0 auto;}}
+            h1 {{ color: #dc3545; font-size: 24px; }}
+            .detail {{ 
+                margin-top: 20px; 
+                padding: 15px; 
+                background-color: #f8d7da; 
+                border: 1px solid #f5c6cb; 
+                border-radius: 5px; 
+                text-align: left; 
+                white-space: pre-wrap;
+                color: #721c24;
+            }}
+            .debug-box {{
+                margin-top: 30px;
+                padding: 15px;
+                background-color: #ffe0e0;
+                border: 1px solid #dc3545;
+                border-radius: 5px;
+                text-align: left;
+                color: #721c24;
+            }}
+            .debug-box h2 {{ margin-top: 0; font-size: 18px; color: #dc3545; }}
+            .debug-box p {{ margin: 5px 0; }}
         </style>
     </head>
     <body>
-        <h1>❌ ¡{title}!</h1>
-        <p>No se pudo completar el proceso.</p>
-        <div class="detail">{detail}</div>
+        <div class="container">
+            {debug_section}
+            <h1>❌ ¡{title}!</h1>
+            <p>No se pudo completar el proceso.</p>
+            <div class="detail"><strong>Detalles del Error:</strong>\n{detail}</div>
+        </div>
     </body>
     </html>
     """
