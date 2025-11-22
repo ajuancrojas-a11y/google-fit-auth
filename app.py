@@ -13,7 +13,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/fitness.activity.write'
 ]
 
-# --- CONFIGURACIÓN DE GOOGLE DRIVE (DESDE VERCEL SECRETS) ---
+# --- CONFIGURACIÓN DE GOOGLE DRIVE (DESDE VERCEL SECRETS.) ---
 GDRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.file']
 GDRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID') # La ID del folder de Drive
 SERVICE_ACCOUNT_KEY = os.getenv('GDRIVE_SERVICE_ACCOUNT_KEY') # JSON de la cuenta de servicio
@@ -246,4 +246,5 @@ def oauth2callback():
 
 if __name__ == '__main__':
     # NOTA: Esto no funciona en Vercel, pero se mantiene para pruebas locales
+
     app.run(debug=True, host='0.0.0.0')
