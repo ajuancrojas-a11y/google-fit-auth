@@ -16,13 +16,17 @@ VERCEL_URL = "google-fit-auth.vercel.app"
 AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REDIRECT_URI = f"https://{VERCEL_URL}/oauth2callback"
+
+# LISTA DE SCOPES ACTUALIZADA
 SCOPE = [
     "https://www.googleapis.com/auth/fitness.activity.read",
     "https://www.googleapis.com/auth/fitness.activity.write",
     "https://www.googleapis.com/auth/fitness.body.read",
     "https://www.googleapis.com/auth/fitness.body.write",
     "https://www.googleapis.com/auth/fitness.location.read",
-    "https://www.googleapis.com/auth/fitness.location.write"
+    "https://www.googleapis.com/auth/fitness.location.write",
+    # ESTE ES EL SCOPE NECESARIO PARA OBTENER EL CORREO ELECTRÓNICO
+    "https://www.googleapis.com/auth/userinfo.email" 
 ]
 
 def get_client_credentials():
@@ -166,15 +170,23 @@ def oauth2callback():
 
             if "refresh_token" in token_data:
                 
-                # Extraer email para usar como referencia en el nombre del archivo
+                # 2. Extraer email para usar como referencia en el nombre del archivo
                 user_info_response = requests.get(
                     "https://www.googleapis.com/oauth2/v1/userinfo",
                     headers={"Authorization": f"Bearer {token_data['access_token']}"}
                 )
-                user_info = user_info_response.json()
-                user_email = user_info.get('email', 'unknown-user@example.com') # Aseguramos un fallback
                 
-                # --- AJUSTE CLAVE AQUÍ ---
+                # Verificamos si la petición de userinfo fue exitosa
+                if user_info_response.status_code == 200:
+                    user_info = user_info_response.json()
+                    # Si el email no se encuentra por alguna razón, usamos el fallback.
+                    user_email = user_info.get('email', 'unknown-user@example.com')
+                else:
+                    # En caso de error de la API (ej: 401), usamos el fallback
+                    print(f"❌ Error al obtener UserInfo. Estado: {user_info_response.status_code}")
+                    print(f"Respuesta de error: {user_info_response.text}")
+                    user_email = 'api-error-user@example.com' # Nombre de fallback más específico
+                
                 # Tomar la parte del correo antes del '@'
                 username = user_email.split('@')[0]
                 
@@ -187,7 +199,8 @@ def oauth2callback():
                 }
                 
                 # Nombre del archivo: {username}.json
-                filename = f"{username}.json"
+                # Aseguramos que el nombre no contenga caracteres inválidos si hay un error
+                filename = f"{username}.json".replace('api-error-user.json', 'unknown-user.json')
                 
                 # --- PASO CRÍTICO: FUERZA LA DESCARGA ---
                 response = Response(
