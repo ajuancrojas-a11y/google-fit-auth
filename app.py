@@ -4,7 +4,7 @@ import requests
 import time
 
 # Flask
-from flask import Flask, redirect, url_for, session, request, Response
+from flask import Flask, redirect, url_for, request, Response
 
 app = Flask(__name__)
 # La clave secreta de Flask se usa para cifrar las sesiones
@@ -38,21 +38,8 @@ def get_client_credentials():
 
 @app.route("/")
 def index():
-    """Página de inicio con el botón de conexión y la información de depuración."""
+    """Página de inicio con el botón de conexión."""
     
-    CLIENT_ID, CLIENT_SECRET = get_client_credentials()
-
-    # Contenido de Depuración
-    debug_info = f"""
-    <div class="debug-box">
-        <h2>⚠️ Información de Depuración (Eliminar después de verificar)</h2>
-        <p><strong>CLIENT_ID (Vercel):</strong> {CLIENT_ID if CLIENT_ID else 'None'}</p>
-        <p><strong>CLIENT_SECRET (Vercel):</strong> {CLIENT_SECRET if CLIENT_SECRET else 'None'}</p>
-        <p><strong>URL de Redirección Esperada:</strong> {REDIRECT_URI}</p>
-        <p>Compara estos valores con tu archivo JSON de credenciales.</p>
-    </div>
-    """
-
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -83,26 +70,14 @@ def index():
             .google-btn:hover {{ background-color: #357ae8; }}
             .google-icon {{ width: 24px; height: 24px; margin-right: 12px; }}
             .note {{ margin-top: 30px; font-size: 14px; color: #70757a; text-align: left; border-top: 1px solid #eee; padding-top: 20px; }}
-            .debug-box {{ 
-                margin-bottom: 30px; 
-                padding: 20px; 
-                background-color: #ffebeb; 
-                border: 1px solid #ff0000; 
-                border-radius: 8px; 
-                text-align: left; 
-                color: #ff0000;
-            }}
-            .debug-box h2 {{ margin-top: 0; font-size: 18px; color: #cc0000; }}
-            .debug-box p {{ margin: 5px 0; color: #cc0000; }}
         </style>
     </head>
     <body>
         <div class="container">
-            {debug_info}
             <h1>Conexión a Google Fit</h1>
             <p>
                 Haz clic para autorizar la conexión. El token será guardado
-                automáticamente como un archivo JSON en la carpeta de <strong>Descargas</strong> de este dispositivo (Memu Play).
+                automáticamente como un archivo JSON en la carpeta de <strong>Descargas</strong> de tu dispositivo.
             </p>
             <a href="{url_for('authorize')}" class="google-btn">
                 <svg class="google-icon" viewBox="0 0 24 24">
@@ -111,7 +86,7 @@ def index():
                 Conectar con Google Fit
             </a>
             <div class="note">
-                <strong>Nota:</strong> Después de la conexión, busca el archivo JSON en la carpeta de Descargas de Memu Play.
+                <strong>Nota:</strong> Después de la conexión exitosa, el navegador descargará automáticamente el archivo de credenciales.
             </div>
         </div>
     </body>
@@ -126,10 +101,9 @@ def authorize():
     CLIENT_ID, CLIENT_SECRET = get_client_credentials()
     
     if not CLIENT_ID or not CLIENT_SECRET:
-         # Usamos la página de error para mostrar el fallo de configuración
+         # Redirige a una página de error genérica si las credenciales no están configuradas
          return error_page("Error de Configuración", 
-                           "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel. Por favor, revísalas.",
-                           CLIENT_ID, CLIENT_SECRET)
+                           "Las variables CLIENT_ID o CLIENT_SECRET no están definidas. Por favor, revisa la configuración de Vercel.")
     
     params = {
         "client_id": CLIENT_ID,
@@ -152,7 +126,7 @@ def oauth2callback():
     CLIENT_ID, CLIENT_SECRET = get_client_credentials()
 
     if not CLIENT_ID or not CLIENT_SECRET:
-         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas en Vercel.", CLIENT_ID, CLIENT_SECRET)
+         return error_page("Error de Configuración", "Las variables CLIENT_ID o CLIENT_SECRET no están definidas.")
 
     if code:
         # 1. Intercambio de código por tokens
@@ -177,20 +151,20 @@ def oauth2callback():
                     headers={"Authorization": f"Bearer {token_data['access_token']}"}
                 )
                 
+                # Definición de nombre por defecto
+                username = f"google_fit_token_{int(time.time())}" 
+                
                 # Verificamos si la petición de userinfo fue exitosa
                 if user_info_response.status_code == 200:
                     user_info = user_info_response.json()
-                    
-                    # <-- IMPORTANTE: ESTA LÍNEA SE MUESTRA EN LOS LOGS DE VERCEL PARA DEBUGGING -->
-                    print(f"✅ Respuesta de UserInfo (para debugging): {user_info}") 
                     
                     # 3. Lógica de Nombramiento del Archivo (Fallbacks)
                     user_email = user_info.get('email', None)
                     user_name = user_info.get('name', None)
                     
                     if user_email:
-                        # Opción 1: Usar la parte antes del @ del email
-                        username = user_email.split('@')[0]
+                        # Opción 1: Usar la parte antes del @ del email, limpiando puntos y convirtiendo a minúsculas
+                        username = user_email.split('@')[0].lower().replace('.', '_')
                         print(f"Usando Email para nombre de archivo: {username}")
                     elif user_name:
                         # Opción 2: Usar el nombre completo (quitando espacios y minúsculas)
@@ -198,15 +172,14 @@ def oauth2callback():
                         print(f"Usando Nombre (Name) para nombre de archivo: {username}")
                     else:
                         # Opción 3: Fallback con timestamp si no hay email ni nombre
-                        username = f"unknown_user_{int(time.time())}"
                         print(f"Falló al obtener Email/Nombre. Usando timestamp: {username}")
                         
                 else:
                     # En caso de error de la API (ej: 401), usamos un fallback con timestamp
                     print(f"❌ Error al obtener UserInfo. Estado: {user_info_response.status_code}")
                     print(f"Respuesta de error: {user_info_response.text}")
-                    username = f"api_error_{int(time.time())}"
-                
+                    # El username ya tiene el valor por defecto basado en timestamp
+
                 # Token a guardar
                 token_to_save = {
                     "refresh_token": token_data["refresh_token"],
@@ -236,27 +209,15 @@ def oauth2callback():
             error_detail = f"Fallo al intercambiar el código por tokens: {str(e)}"
     
     else:
-        # Esto ocurre si el usuario deniega los permisos
-        error_detail = "El usuario denegó la autorización o el código no fue proporcionado. Revoca el permiso en Google si necesitas intentar de nuevo."
+        # Esto ocurre si el usuario deniega los permisos o el código es inválido
+        error_detail = "El usuario denegó la autorización o el código no fue proporcionado. Intenta de nuevo y acepta los permisos solicitados."
 
     # Si hay un error, lo mostramos en una página de error simple
-    return error_page("Error de Conexión", error_detail, CLIENT_ID, CLIENT_SECRET)
+    return error_page("Error de Conexión", error_detail)
 
-def error_page(title, detail, client_id_val=None, client_secret_val=None):
-    """Genera una página HTML simple para mostrar errores con info de debug."""
+def error_page(title, detail):
+    """Genera una página HTML simple para mostrar errores sin información de depuración."""
     
-    # Prepara la información de debug para el error
-    debug_section = ""
-    if client_id_val is None or client_secret_val is None:
-        debug_section = f"""
-        <div class="debug-box">
-            <h2>🚨 Diagnóstico de Variables de Entorno</h2>
-            <p><strong>CLIENT_ID (Leído):</strong> {client_id_val if client_id_val else '❌ Falla la lectura (None)'}</p>
-            <p><strong>CLIENT_SECRET (Leído):</strong> {client_secret_val if client_secret_val else '❌ Falla la lectura (None)'}</p>
-            <p><strong>ACCIONES:</strong> Vuelve a desplegar la aplicación en Vercel y verifica que las variables CLIENT_ID y CLIENT_SECRET estén configuradas para **All Environments**.</p>
-        </div>
-        """
-        
     return f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -278,25 +239,25 @@ def error_page(title, detail, client_id_val=None, client_secret_val=None):
                 white-space: pre-wrap;
                 color: #721c24;
             }}
-            .debug-box {{
+            .back-btn {{
+                display: inline-block;
                 margin-top: 30px;
-                padding: 15px;
-                background-color: #ffe0e0;
-                border: 1px solid #dc3545;
+                padding: 10px 20px;
+                background-color: #007bff;
+                color: white;
+                text-decoration: none;
                 border-radius: 5px;
-                text-align: left;
-                color: #721c24;
+                transition: background-color 0.3s;
             }}
-            .debug-box h2 {{ margin-top: 0; font-size: 18px; color: #dc3545; }}
-            .debug-box p {{ margin: 5px 0; }}
+            .back-btn:hover {{ background-color: #0056b3; }}
         </style>
     </head>
     <body>
         <div class="container">
-            {debug_section}
             <h1>❌ ¡{title}!</h1>
-            <p>No se pudo completar el proceso.</p>
+            <p>No se pudo completar el proceso de conexión.</p>
             <div class="detail"><strong>Detalles del Error:</strong>\n{detail}</div>
+            <a href="/" class="back-btn">Volver a Intentar</a>
         </div>
     </body>
     </html>
