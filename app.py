@@ -42,13 +42,24 @@ def index():
     
     CLIENT_ID, CLIENT_SECRET = get_client_credentials()
 
+    # Contenido de Depuración
+    debug_info = f"""
+    <div class="debug-box">
+        <h2>⚠️ Información de Depuración (Eliminar después de verificar)</h2>
+        <p><strong>CLIENT_ID (Vercel):</strong> {CLIENT_ID if CLIENT_ID else 'None'}</p>
+        <p><strong>CLIENT_SECRET (Vercel):</strong> {CLIENT_SECRET if CLIENT_SECRET else 'None'}</p>
+        <p><strong>URL de Redirección Esperada:</strong> {REDIRECT_URI}</p>
+        <p>Compara estos valores con tu archivo JSON de credenciales.</p>
+    </div>
+    """
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Conexión a Google Fit22</title>
+        <title>Conexión a Google Fit</title>
         <style>
             body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }}
             .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 600px; width: 90%; }}
@@ -293,4 +304,3 @@ def error_page(title, detail, client_id_val=None, client_secret_val=None):
 
 if __name__ == "__main__":
     app.run(debug=True)
-
