@@ -48,7 +48,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Conexión a Google Fit</title>
+        <title>Conexión a Google Fit22</title>
         <style>
             body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }}
             .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 600px; width: 90%; }}
@@ -293,3 +293,4 @@ def error_page(title, detail, client_id_val=None, client_secret_val=None):
 
 if __name__ == "__main__":
     app.run(debug=True)
+
