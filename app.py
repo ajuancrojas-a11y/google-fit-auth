@@ -17,7 +17,7 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REDIRECT_URI = f"https://{VERCEL_URL}/oauth2callback"
 
-# LISTA DE SCOPES ACTUALIZADA: incluye OpenID Connect (openid, profile) para garantizar el email
+# LISTA DE SCOPES: incluye OIDC estándar (openid, profile) para garantizar la identidad del usuario.
 SCOPE = [
     "https://www.googleapis.com/auth/fitness.activity.read",
     "https://www.googleapis.com/auth/fitness.activity.write",
@@ -25,7 +25,6 @@ SCOPE = [
     "https://www.googleapis.com/auth/fitness.body.write",
     "https://www.googleapis.com/auth/fitness.location.read",
     "https://www.googleapis.com/auth/fitness.location.write",
-    # Scopes OIDC estándar para obtener la identidad del usuario (email y nombre)
     "openid", 
     "profile",
     "https://www.googleapis.com/auth/userinfo.email" 
@@ -172,8 +171,7 @@ def oauth2callback():
 
             if "refresh_token" in token_data:
                 
-                # 2. Extraer email para usar como referencia en el nombre del archivo
-                # Usamos el endpoint estándar de OIDC para información de usuario
+                # 2. Extraer información del usuario (email y nombre)
                 user_info_response = requests.get(
                     "https://openidconnect.googleapis.com/v1/userinfo",
                     headers={"Authorization": f"Bearer {token_data['access_token']}"}
@@ -182,36 +180,42 @@ def oauth2callback():
                 # Verificamos si la petición de userinfo fue exitosa
                 if user_info_response.status_code == 200:
                     user_info = user_info_response.json()
+                    
                     # <-- IMPORTANTE: ESTA LÍNEA SE MUESTRA EN LOS LOGS DE VERCEL PARA DEBUGGING -->
                     print(f"✅ Respuesta de UserInfo (para debugging): {user_info}") 
-                    # Si el email no se encuentra, usamos el fallback.
-                    user_email = user_info.get('email', 'unknown-user-no-email@example.com') 
+                    
+                    # 3. Lógica de Nombramiento del Archivo (Fallbacks)
+                    user_email = user_info.get('email', None)
+                    user_name = user_info.get('name', None)
+                    
+                    if user_email:
+                        # Opción 1: Usar la parte antes del @ del email
+                        username = user_email.split('@')[0]
+                        print(f"Usando Email para nombre de archivo: {username}")
+                    elif user_name:
+                        # Opción 2: Usar el nombre completo (quitando espacios y minúsculas)
+                        username = user_name.lower().replace(' ', '_')
+                        print(f"Usando Nombre (Name) para nombre de archivo: {username}")
+                    else:
+                        # Opción 3: Fallback con timestamp si no hay email ni nombre
+                        username = f"unknown_user_{int(time.time())}"
+                        print(f"Falló al obtener Email/Nombre. Usando timestamp: {username}")
+                        
                 else:
-                    # En caso de error de la API (ej: 401), usamos un fallback más seguro
+                    # En caso de error de la API (ej: 401), usamos un fallback con timestamp
                     print(f"❌ Error al obtener UserInfo. Estado: {user_info_response.status_code}")
                     print(f"Respuesta de error: {user_info_response.text}")
-                    user_email = 'api-error-user@example.com' 
+                    username = f"api_error_{int(time.time())}"
                 
-                # Tomar la parte del correo antes del '@'
-                username = user_email.split('@')[0]
-                
-                # Token a guardar (solo necesitamos el refresh_token y el client info)
-                # IMPORTANTE: Guardamos el CLIENT_ID y CLIENT_SECRET dentro del token JSON.
+                # Token a guardar
                 token_to_save = {
                     "refresh_token": token_data["refresh_token"],
                     "client_id": CLIENT_ID,
                     "client_secret": CLIENT_SECRET,
                 }
                 
-                # Nombre del archivo: {username}.json
-                # Manejamos los fallbacks en el nombre del archivo
-                if username in ['unknown-user-no-email', 'api-error-user']:
-                    # Si caímos en un error, nombramos el archivo con un timestamp para evitar sobreescritura
-                    timestamp = int(time.time())
-                    filename = f"google_fit_token_{timestamp}.json"
-                    print(f"⚠️ Alerta: El nombre de usuario no se pudo obtener. Usando fallback de nombre: {filename}")
-                else:
-                    filename = f"{username}.json"
+                # Nombre del archivo final
+                filename = f"{username}.json"
                 
                 # --- PASO CRÍTICO: FUERZA LA DESCARGA ---
                 response = Response(
@@ -224,7 +228,7 @@ def oauth2callback():
                 return response
                 
             else:
-                # Error en el intercambio de token, puede ser invalid_client, etc.
+                # Error en el intercambio de token
                 error_desc = token_data.get("error_description", token_data.get("error", "Error desconocido al obtener el token."))
                 error_detail = f"Fallo al obtener refresh_token.\n\nMensaje de Google: {error_desc}\n\nAsegúrate de que CLIENT_ID y CLIENT_SECRET sean correctos y que la URL de redirección en Google Cloud Console coincida exactamente con: {REDIRECT_URI}."
 
