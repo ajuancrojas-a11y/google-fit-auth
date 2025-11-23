@@ -42,17 +42,6 @@ def index():
     
     CLIENT_ID, CLIENT_SECRET = get_client_credentials()
 
-    # Contenido de Depuración
-    debug_info = f"""
-    <div class="debug-box">
-        <h2>⚠️ Información de Depuración (Eliminar después de verificar)</h2>
-        <p><strong>CLIENT_ID (Vercel):</strong> {CLIENT_ID if CLIENT_ID else 'None'}</p>
-        <p><strong>CLIENT_SECRET (Vercel):</strong> {CLIENT_SECRET if CLIENT_SECRET else 'None'}</p>
-        <p><strong>URL de Redirección Esperada:</strong> {REDIRECT_URI}</p>
-        <p>Compara estos valores con tu archivo JSON de credenciales.</p>
-    </div>
-    """
-
     html_content = f"""
     <!DOCTYPE html>
     <html lang="es">
