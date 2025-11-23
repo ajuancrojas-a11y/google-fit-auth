@@ -12,7 +12,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super_secret_key_for_flask"
 
 # URL Base de Vercel/tu app (ej: google-fit-auth.vercel.app)
 # IMPORTANTE: Confirma que la URL de tu proyecto sea correcta.
-VERCEL_URL = "google-fit-auth.vercel.app" 
+VERCEL_URL = "google-fit-auth.vercel.app"
 AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REDIRECT_URI = f"https://{VERCEL_URL}/oauth2callback"
@@ -132,7 +132,7 @@ def authorize():
         "response_type": "code",
         "scope": " ".join(SCOPE),
         "access_type": "offline",  # Importante para obtener el refresh token
-        "prompt": "consent",       # Forzar el consentimiento para obtener siempre el refresh token
+        "prompt": "consent",        # Forzar el consentimiento para obtener siempre el refresh token
     }
     auth_url = f"{AUTH_URL}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
     
@@ -172,20 +172,22 @@ def oauth2callback():
                     headers={"Authorization": f"Bearer {token_data['access_token']}"}
                 )
                 user_info = user_info_response.json()
-                user_email = user_info.get('email', 'unknown-user')
+                user_email = user_info.get('email', 'unknown-user@example.com') # Aseguramos un fallback
+                
+                # --- AJUSTE CLAVE AQUÍ ---
+                # Tomar la parte del correo antes del '@'
+                username = user_email.split('@')[0]
                 
                 # Token a guardar (solo necesitamos el refresh_token y el client info)
                 # IMPORTANTE: Guardamos el CLIENT_ID y CLIENT_SECRET dentro del token JSON.
-                # Esto es necesario para que el script 'insertar_pasos.py' pueda refrescar 
-                # el token localmente usando google-auth.
                 token_to_save = {
                     "refresh_token": token_data["refresh_token"],
                     "client_id": CLIENT_ID,
                     "client_secret": CLIENT_SECRET,
                 }
                 
-                # Nombre del archivo basado en el email
-                filename = f"google_fit_token_{user_email.replace('@', '_at_')}.json"
+                # Nombre del archivo: {username}.json
+                filename = f"{username}.json"
                 
                 # --- PASO CRÍTICO: FUERZA LA DESCARGA ---
                 response = Response(
@@ -195,7 +197,7 @@ def oauth2callback():
                 response.headers['Content-Disposition'] = f'attachment; filename={filename}'
                 
                 print(f"✅ Token generado y enviado para descarga: {filename}")
-                return response 
+                return response
                 
             else:
                 # Error en el intercambio de token, puede ser invalid_client, etc.
