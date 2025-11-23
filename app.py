@@ -18,8 +18,11 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 REDIRECT_URI = f"https://{VERCEL_URL}/oauth2callback"
 SCOPE = [
     "https://www.googleapis.com/auth/fitness.activity.read",
+    "https://www.googleapis.com/auth/fitness.activity.write",
+    "https://www.googleapis.com/auth/fitness.body.read",
+    "https://www.googleapis.com/auth/fitness.body.write",
     "https://www.googleapis.com/auth/fitness.location.read",
-    "https://www.googleapis.com/auth/userinfo.email"
+    "https://www.googleapis.com/auth/fitness.location.write"
 ]
 
 def get_client_credentials():
